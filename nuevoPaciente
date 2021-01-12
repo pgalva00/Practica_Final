@@ -1,0 +1,87 @@
+# include <stdio.h>
+# include <stdlib.h>
+# include <ctype.h>
+# include <time.h>
+# include <pthread.h>
+# include <signal.h>
+# include <sys/types.h>
+# include <sys/wait.h>
+# include <unistd.h>
+# include <errno.h>
+
+/*Definicion de funciones*/
+void nuevoPaciente(int s);
+void accionesPaciente(int s);
+/* Variables globales*/
+int numPacientes = 15;
+int contPacientes = 0;
+int numPacientesTotal = 0;
+struct Paciente{
+	int id;
+	int idPaciente;
+	int atendido;
+	int tipo;//0-junior, 1-medios, 2-senior
+	int serologia;
+	pthread_t hiloPaciente;
+};
+struct Paciente *listaDePacientes;
+
+/*Definicion de funciones*/
+pthread_mutex_t mutexCreaHilos;
+pthread_mutex_t  mutexColaPacientes;
+pthread_mutex_t mutexLog;
+
+/*Main*/
+int main(int argc, char const *argv[]){
+
+	//puntero a la lista de pacientes
+	listaDePacientes = (struct Paciente*)malloc(sizeof(struct Paciente)*numPacientes);
+
+	//estructura para la entrada de los pacientes y se enmascaran las señales
+	struct sigaction sJun = {0};
+	sJun.sa_handler = nuevoPaciente;
+	struct sigaction sMed = {0};
+	sMed.sa_handler = nuevoPaciente;
+	struct sigaction sSen = {0};
+	sSen.sa_handler = nuevoPaciente;
+	if(-1 == sigaction(SIGUSR1, &sJun, NULL) || -1 == sigaction(SIGUSR2, &sMed, NULL) || -1 == sigaction(SIGPIPE, &sSen, NULL)){
+		perror("Entrada de Pacientes: sigaction");
+		exit(-1);
+	}
+
+	//inicializamos los mutex
+	if(pthread_mutex_init(&mutexCreaHilos, NULL)!= 0) exit(-1);
+	if(pthread_mutex_init(&mutexColaPacientes, NULL)!= 0) exit(-1);
+	if(pthread_mutex_init(&mutexLog, NULL)!= 0) exit(-1);
+
+	//
+}
+
+/*Funcion nuevoPaciente*/
+void nuevoPaciente(int signal){
+	printf("Se ha registrado una nueva Paciente, hay %d pacientes en la consulta.\n", contPacientes+1);
+	if(contPacientes>=numPacientes){
+		printf("Solicitud rechazada, la cola esta llena.\n");
+	} else{ //se añade paciente
+		pthread_mutex_lock(&mutexColaPacientes);
+		listaDePacientes[contPacientes].id = contPacientes;
+		listaDePacientes[contPacientes].atendido = 0;
+		listaDePacientes[contPacientes].idPaciente = ++numPacientesTotal;
+		switch (signal) {
+			case SIGUSR1://junior
+				listaDePacientes[contPacientes].tipo = 0;
+				pthread_create(&listaDePacientes[contPacientes].hiloPaciente, NULL, accionesPaciente, (void*)(intptr_t)contPacientes);
+				break;
+			case SIGUSR2://medios
+				listaDePacientes[contPacientes].tipo = 1;
+				pthread_create(&listaDePacientes[contPacientes].hiloPaciente, NULL, accionesPaciente, (void*)(intptr_t)contPacientes);
+				break;
+			case SIGPIPE://senior
+				listaDePacientes[contPacientes].tipo = 2;
+				pthread_create(&listaDePacientes[contPacientes].hiloPaciente, NULL, accionesPaciente, (void*)(intptr_t)contPacientes);
+				break;
+		}
+		contPacientes++;
+		pthread_mutex_unlock(&mutexColaPacientes);
+	}
+}
